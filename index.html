@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>Hand Tracking Arena 3D</title>
+<style>
+  :root { --panel: rgba(8,12,28,.78); --border: rgba(255,255,255,.16); --text:#f5f7ff; --muted:#aeb7d8; --accent:#6ee7ff; }
+  *{box-sizing:border-box}
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#03040b;color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,sans-serif}
+  canvas{display:block}
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:5}
+  .topbar{position:absolute;top:14px;left:14px;right:14px;display:flex;gap:10px;justify-content:space-between;align-items:flex-start}
+  .stats{display:flex;gap:8px;flex-wrap:wrap;max-width:75vw}
+  .chip{background:rgba(9,13,30,.6);border:1px solid var(--border);backdrop-filter:blur(10px);padding:9px 12px;border-radius:12px;font-size:14px;box-shadow:0 8px 26px rgba(0,0,0,.25)}
+  .chip b{color:var(--accent)}
+  #pauseBtn{pointer-events:auto;border:1px solid var(--border);background:rgba(9,13,30,.7);color:white;border-radius:12px;padding:10px 13px;cursor:pointer}
+  #centerMessage{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;padding:18px 22px;border-radius:16px;background:rgba(7,10,24,.72);border:1px solid rgba(255,255,255,.13);backdrop-filter:blur(12px);max-width:min(680px,92vw);line-height:1.45;opacity:0;transition:opacity .2s}
+  #centerMessage.show{opacity:1}
+  #crosshair{position:absolute;left:50%;top:50%;width:24px;height:24px;transform:translate(-50%,-50%);opacity:.8}
+  #crosshair:before,#crosshair:after{content:"";position:absolute;background:#fff;border-radius:4px;box-shadow:0 0 12px #fff}
+  #crosshair:before{width:24px;height:2px;top:11px;left:0}.crosshair:after{}
+  #crosshair:after{width:2px;height:24px;top:0;left:11px}
+  .panel{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(circle at center,rgba(20,31,70,.72),rgba(2,3,10,.96));z-index:20;padding:20px}
+  .card{width:min(760px,94vw);max-height:90vh;overflow:auto;padding:34px;border-radius:22px;background:rgba(10,14,31,.9);border:1px solid rgba(255,255,255,.13);box-shadow:0 28px 90px rgba(0,0,0,.5);text-align:center}
+  .card h1{font-size:clamp(30px,6vw,58px);margin:0 0 8px;letter-spacing:-1px;background:linear-gradient(90deg,#fff,#7be7ff);color:transparent;background-clip:text;-webkit-background-clip:text}
+  .card p{color:var(--muted);margin:9px auto;max-width:640px}
+  .instructions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:22px 0;text-align:left}
+  .instruction{padding:13px 14px;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.035)}
+  .instruction strong{display:block;margin-bottom:4px}
+  .btnrow{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:18px}
+  .btn{pointer-events:auto;border:0;border-radius:12px;padding:13px 19px;font-weight:750;cursor:pointer;background:linear-gradient(135deg,#66e8ff,#7c7cff);color:#05101c;box-shadow:0 12px 30px rgba(89,181,255,.25)}
+  .btn.secondary{background:rgba(255,255,255,.08);border:1px solid var(--border);color:#fff}
+  .hidden{display:none!important}
+  #modeBadge{margin-top:16px;color:#b9c5eb;font-size:13px}
+  #cameraHint{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:6;color:#d4dcff;background:rgba(5,8,20,.64);border:1px solid var(--border);backdrop-filter:blur(8px);padding:8px 11px;border-radius:10px;font-size:12px;pointer-events:none;white-space:nowrap}
+  @media(max-width:620px){.instructions{grid-template-columns:1fr}.card{padding:23px}.stats{max-width:68vw}.chip{font-size:12px;padding:8px 10px}}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div class="topbar">
+    <div class="stats">
+      <div class="chip">Puntos: <b id="score">0</b></div>
+      <div class="chip">Vidas: <b id="lives">3</b></div>
+      <div class="chip">Nivel: <b id="level">1</b></div>
+      <div class="chip">Tiempo: <b id="time">60</b>s</div>
+      <div class="chip">Racha: <b id="streak">0</b></div>
+    </div>
+    <button id="pauseBtn">Pausa</button>
+  </div>
+  <div id="crosshair"></div>
+  <div id="centerMessage"></div>
+  <div id="cameraHint">Escritorio: señala con el cursor y clic para interactuar · WASD para moverte · VR: pellizco para agarrar</div>
+</div>
+
+<section id="menu" class="panel">
+  <div class="card">
+    <h1>Hand Tracking Arena</h1>
+    <p>Una arena 3D de reacción en 360°: encuentra y captura núcleos brillantes antes de que desaparezcan.</p>
+    <div class="instructions">
+      <div class="instruction"><strong>🤏 Agarrar</strong>Pellizca pulgar + índice sobre un núcleo y muévelo.</div>
+      <div class="instruction"><strong>☝️ Señalar</strong>Apunta para resaltar elementos interactivos.</div>
+      <div class="instruction"><strong>🖐️ Mover / acercar</strong>Acerca o aleja la mano para transformar la interacción.</div>
+      <div class="instruction"><strong>🌀 Girar</strong>Gira el objeto agarrado para ajustar el ángulo y obtener bonus.</div>
+    </div>
+    <div class="btnrow"><button class="btn" id="startBtn">Iniciar juego</button><button class="btn secondary" id="xrBtn">Entrar en VR</button></div>
+    <div id="modeBadge">Modo: escritorio disponible. WebXR se activa si el dispositivo y navegador lo permiten.</div>
+  </div>
+</section>
+
+<section id="pausePanel" class="panel hidden">
+  <div class="card">
+    <h2>Juego en pausa</h2>
+    <p>Tu arena permanece congelada.</p>
+    <div class="btnrow"><button class="btn" id="resumeBtn">Continuar</button><button class="btn secondary" id="restartBtn1">Reiniciar</button></div>
+  </div>
+</section>
+
+<section id="gameOverPanel" class="panel hidden">
+  <div class="card">
+    <h2 id="gameOverTitle">Fin de la partida</h2>
+    <p id="gameOverStats"></p>
+    <div class="btnrow"><button class="btn" id="restartBtn2">Jugar de nuevo</button></div>
+  </div>
+</section>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+// ============================================================
+// CONFIGURACIÓN DEL JUEGO: estas constantes permiten cambiar
+// fácilmente la temática, colores, reglas y dificultad.
+// ============================================================
+const CONFIG = {
+  theme: {
+    background: 0x03040b,
+    fog: 0x050717,
+    coreColors: [0x69f5ff, 0x9d7cff, 0xff6bd6, 0x70ff9a, 0xffd35e],
+    enemyColor: 0xff3659
+  },
+  rules: {
+    startTime: 60,
+    startingLives: 3,
+    targetsPerLevel: 7,
+    pointsBase: 100,
+    timeBonus: 2,
+    missPenalty: 1,
+    maxObjects: 14,
+    arenaRadius: 8
+  },
+  difficulty: {
+    spawnEveryBase: 1.15,
+    lifeEveryBase: 6.0,
+    fallSpeedBase: 0.42,
+    levelSpeedFactor: 0.12
+  }
+};
+
+// ============================================================
+// ESTADO
+// ============================================================
+let score = 0;
+let lives = CONFIG.rules.startingLives;
+let level = 1;
+let timeLeft = CONFIG.rules.startTime;
+let streak = 0;
+let targetsCaughtThisLevel = 0;
+let spawnClock = 0;
+let lifeClock = 0;
+let gameRunning = false;
+let gamePaused = false;
+let xrStarted = false;
+let desktopMode = true;
+let selectedObject = null;
+let pointer = new THREE.Vector2();
+let raycaster = new THREE.Raycaster();
+let clock = new THREE.Clock();
+let audioCtx = null;
+
+const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
+const levelEl = document.getElementById('level');
+const timeEl = document.getElementById('time');
+const streakEl = document.getElementById('streak');
+const menu = document.getElementById('menu');
+const pausePanel = document.getElementById('pausePanel');
+const gameOverPanel = document.getElementById('gameOverPanel');
+const centerMessage = document.getElementById('centerMessage');
+const cameraHint = document.getElementById('cameraHint');
+const xrBtn = document.getElementById('xrBtn');
+
+// ============================================================
+// THREE.JS / ESCENA 360°
+// ============================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(CONFIG.theme.background);
+scene.fog = new THREE.FogExp2(CONFIG.theme.fog, 0.028);
+
+const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.03, 100);
+camera.position.set(0, 1.6, 0);
+
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true, powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+document.body.appendChild(renderer.domElement);
+
+// Se conserva VRButton como respaldo visual/API de Three.js, pero el juego usa
+// su propio botón para solicitar la sesión directamente y conservar la activación
+// del gesto del usuario.
+const builtInVrButton = VRButton.createButton(renderer, {optionalFeatures:['hand-tracking','local-floor']});
+builtInVrButton.style.display = 'none';
+document.body.appendChild(builtInVrButton);
+
+// Iluminación ambiental + punto central.
+scene.add(new THREE.HemisphereLight(0x8dbbff, 0x171529, 1.35));
+const keyLight = new THREE.PointLight(0x73eaff, 22, 25, 2);
+keyLight.position.set(0, 3, 0);
+scene.add(keyLight);
+
+// Suelo circular para referencia espacial, visto en 360°.
+const floor = new THREE.Mesh(
+  new THREE.CircleGeometry(11, 64),
+  new THREE.MeshStandardMaterial({color:0x071025, roughness:0.86, metalness:0.12, emissive:0x020613})
+);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = 0;
+scene.add(floor);
+
+// Anillo 360°.
+const ring = new THREE.Mesh(
+  new THREE.TorusGeometry(6.8, 0.035, 8, 128),
+  new THREE.MeshBasicMaterial({color:0x396eff, transparent:true, opacity:.46})
+);
+ring.rotation.x = Math.PI/2;
+ring.position.y = 0.05;
+scene.add(ring);
+
+// Partículas del ambiente.
+const starGeo = new THREE.BufferGeometry();
+const starCount = 750;
+const pos = new Float32Array(starCount * 3);
+for(let i=0;i<starCount;i++){
+  const r = 7 + Math.random()*11;
+  const a = Math.random()*Math.PI*2;
+  const y = 1 + (Math.random()-.5)*8;
+  pos[i*3] = Math.cos(a)*r;
+  pos[i*3+1] = y;
+  pos[i*3+2] = Math.sin(a)*r;
+}
+starGeo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+const stars = new THREE.Points(starGeo,new THREE.PointsMaterial({color:0x94b4ff,size:.035,transparent:true,opacity:.65}));
+scene.add(stars);
+
+// Grupo de contenido para rotaciones/efectos globales.
+const world = new THREE.Group();
+scene.add(world);
+
+const targets = [];
+const effects = [];
+
+// ============================================================
+// AUDIO SINTÉTICO (sin archivos externos)
+// ============================================================
+function ensureAudio(){
+  if(!audioCtx){ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+  if(audioCtx.state === 'suspended') audioCtx.resume();
+}
+function beep(freq=440,dur=.08,type='sine',gain=.035){
+  try{
+    ensureAudio();
+    const osc=audioCtx.createOscillator(), g=audioCtx.createGain();
+    osc.type=type; osc.frequency.value=freq; g.gain.setValueAtTime(gain,audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.0001,audioCtx.currentTime+dur);
+    osc.connect(g).connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime+dur);
+  }catch(e){}
+}
+
+// ============================================================
+// UTILIDADES
+// ============================================================
+function randomDirection(){
+  const v = new THREE.Vector3(Math.random()*2-1, Math.random()*2-0.7, Math.random()*2-1).normalize();
+  return v;
+}
+function randomSpawnPosition(){
+  const radius = 4.0 + Math.random()*(CONFIG.rules.arenaRadius-4.0);
+  const ang = Math.random()*Math.PI*2;
+  const y = .8 + Math.random()*4.7;
+  return new THREE.Vector3(Math.cos(ang)*radius, y, Math.sin(ang)*radius);
+}
+function showMessage(text, ms=900){
+  centerMessage.textContent = text;
+  centerMessage.classList.add('show');
+  clearTimeout(showMessage._t);
+  showMessage._t = setTimeout(()=>centerMessage.classList.remove('show'),ms);
+}
+function updateHud(){
+  scoreEl.textContent = score;
+  livesEl.textContent = lives;
+  levelEl.textContent = level;
+  timeEl.textContent = Math.max(0, Math.ceil(timeLeft));
+  streakEl.textContent = streak;
+}
+function clearTargets(){
+  while(targets.length){ removeTarget(targets[0]); }
+}
+
+function addBurst(position,color=0xffffff){
+  const group = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({color, transparent:true, opacity:1});
+  for(let i=0;i<14;i++){
+    const m = new THREE.Mesh(new THREE.SphereGeometry(.045,6,6),mat.clone());
+    m.position.copy(position);
+    m.userData.vel = randomDirection().multiplyScalar(.9 + Math.random()*2.1);
+    group.add(m);
+  }
+  world.add(group);
+  effects.push({group,life:.55});
+}
+
+function createTarget(){
+  if(targets.length >= CONFIG.rules.maxObjects) return;
+  const color = CONFIG.theme.coreColors[Math.floor(Math.random()*CONFIG.theme.coreColors.length)];
+  const group = new THREE.Group();
+  const orb = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(.28 + Math.random()*.10, 2),
+    new THREE.MeshStandardMaterial({color, emissive:color, emissiveIntensity:2.4, metalness:.25, roughness:.22})
+  );
+  group.add(orb);
+
+  const halo = new THREE.Mesh(
+    new THREE.SphereGeometry(.50, 16, 16),
+    new THREE.MeshBasicMaterial({color, transparent:true, opacity:.10, depthWrite:false})
+  );
+  group.add(halo);
+
+  const ringA = new THREE.Mesh(
+    new THREE.TorusGeometry(.46,.02,6,40),
+    new THREE.MeshBasicMaterial({color, transparent:true, opacity:.8})
+  );
+  const ringB = ringA.clone(); ringB.rotation.x=Math.PI/2;
+  group.add(ringA,ringB);
+
+  group.position.copy(randomSpawnPosition());
+  group.userData = {
+    type:'target',
+    velocity: randomDirection().multiplyScalar(CONFIG.difficulty.fallSpeedBase + level*CONFIG.difficulty.levelSpeedFactor),
+    phase: Math.random()*Math.PI*2,
+    grabbed:false,
+    grabbedDistance:0,
+    born:performance.now()
+  };
+  world.add(group);
+  targets.push(group);
+}
+
+function removeTarget(target){
+  const idx=targets.indexOf(target);
+  if(idx>=0) targets.splice(idx,1);
+  world.remove(target);
+  target.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material))o.material.forEach(m=>m.dispose()); else o.material.dispose(); }});
+}
+
+function catchTarget(target){
+  if(!target || !targets.includes(target)) return;
+  const p=target.position.clone();
+  const color=target.children[0]?.material?.color?.getHex() ?? 0xffffff;
+  addBurst(p,color);
+  const bonus = CONFIG.rules.pointsBase + streak*15 + level*25;
+  score += bonus;
+  streak += 1;
+  targetsCaughtThisLevel += 1;
+  timeLeft = Math.min(CONFIG.rules.startTime + level*3, timeLeft + CONFIG.rules.timeBonus);
+  beep(650 + streak*22, .11, 'triangle', .045);
+  removeTarget(target);
+  showMessage(`+${bonus} puntos`,500);
+  if(targetsCaughtThisLevel >= CONFIG.rules.targetsPerLevel){
+    level += 1;
+    targetsCaughtThisLevel = 0;
+    timeLeft = Math.min(timeLeft + 8, CONFIG.rules.startTime + level*3);
+    beep(980,.22,'sawtooth',.05);
+    showMessage(`¡Nivel ${level}!`,1100);
+  }
+  updateHud();
+}
+
+function missTarget(target){
+  if(!targets.includes(target)) return;
+  lives -= CONFIG.rules.missPenalty;
+  streak = 0;
+  beep(145,.18,'square',.035);
+  removeTarget(target);
+  showMessage('¡Se escapó un núcleo!',650);
+  updateHud();
+  if(lives<=0) endGame('Sin vidas');
+}
+
+// ============================================================
+// GESTOS / HAND TRACKING WebXR
+// ============================================================
+const handVisuals = {left:null,right:null};
+const previousHands = new Map();
+
+function makeHandTipMarker(){
+  const m = new THREE.Mesh(new THREE.SphereGeometry(.045,10,10),new THREE.MeshBasicMaterial({color:0x71efff}));
+  m.visible=false; scene.add(m); return m;
+}
+handVisuals.left = makeHandTipMarker();
+handVisuals.right = makeHandTipMarker();
+
+function getJointPose(frame, source, jointName, refSpace){
+  try{
+    if(!source.hand) return null;
+    const joint = source.hand.get(jointName);
+    if(!joint) return null;
+    const pose = frame.getJointPose(joint, refSpace);
+    return pose || null;
+  }catch(e){ return null; }
+}
+function processHands(frame, refSpace){
+  const sources = renderer.xr.getSession()?.inputSources || [];
+  for(const src of sources){
+    if(!src.hand) continue;
+    const chirality=src.handedness==='left'?'left':'right';
+    const wrist = getJointPose(frame,src,'wrist',refSpace);
+    const thumb = getJointPose(frame,src,'thumb-tip',refSpace);
+    const index = getJointPose(frame,src,'index-finger-tip',refSpace);
+    if(!wrist || !thumb || !index) continue;
+
+    const ip = new THREE.Vector3(index.transform.position.x,index.transform.position.y,index.transform.position.z);
+    const tp = new THREE.Vector3(thumb.transform.position.x,thumb.transform.position.y,thumb.transform.position.z);
+    const wp = new THREE.Vector3(wrist.transform.position.x,wrist.transform.position.y,wrist.transform.position.z);
+    handVisuals[chirality].position.copy(ip); handVisuals[chirality].visible=true;
+
+    const pinchDistance=ip.distanceTo(tp);
+    const pinch = pinchDistance < 0.035; // umbral en metros XR
+    const key = chirality;
+    const prev=previousHands.get(key) || {pinch:false,index:ip.clone(),wrist:wp.clone(),time:performance.now()};
+
+    // Señalar: se crea un rayo desde la punta del índice hacia delante.
+    const indexForward = new THREE.Vector3(0,0,-1).applyQuaternion(new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion(
+      index.orientation?.x||0,index.orientation?.y||0,index.orientation?.z||0,index.orientation?.w||1))));
+    // La API de joints no siempre expone orientation en todos los navegadores;
+    // usamos un vector de la muñeca a la punta como fallback visual/funcional.
+    indexForward.copy(ip).sub(wp).normalize();
+    if(indexForward.lengthSq()<.0001) indexForward.set(0,0,-1);
+
+    if(pinch && !prev.pinch){
+      const ray = new THREE.Raycaster(ip,indexForward.normalize(),0,2.1);
+      const hits = ray.intersectObjects(targets,true);
+      if(hits.length){
+        selectedObject = hits[0].object.parent;
+        while(selectedObject && !targets.includes(selectedObject)) selectedObject=selectedObject.parent;
+        if(selectedObject){
+          selectedObject.userData.grabbed=true;
+          selectedObject.userData.handKey=key;
+          selectedObject.userData.grabbedDistance=ip.distanceTo(selectedObject.position);
+          beep(520,.07,'sine',.03);
+        }
+      }
+    }
+    if(selectedObject && selectedObject.userData.handKey===key && pinch){
+      // Mover al punto del índice conservando una pequeña distancia.
+      const targetPos = ip.clone().add(indexForward.clone().multiplyScalar(selectedObject.userData.grabbedDistance || .5));
+      selectedObject.position.lerp(targetPos,.42);
+      selectedObject.rotation.y += (ip.x-prev.index.x)*13;
+      selectedObject.rotation.x += (ip.y-prev.index.y)*13;
+    }
+    if(prev.pinch && !pinch && selectedObject && selectedObject.userData.handKey===key){
+      selectedObject.userData.grabbed=false;
+      // Soltar cerca del jugador = confirmar captura; lejos = lanzamiento.
+      const dist=selectedObject.position.distanceTo(camera.position);
+      if(dist<5.6) catchTarget(selectedObject); else { selectedObject.userData.velocity.copy(indexForward).multiplyScalar(1.5); beep(360,.08,'triangle',.025); }
+      selectedObject=null;
+    }
+    previousHands.set(key,{pinch,index:ip.clone(),wrist:wp.clone(),time:performance.now()});
+  }
+
+  for(const key of ['left','right']){
+    if(!sources.some(s=>s.hand && (s.handedness==='left'?'left':'right')===key)) handVisuals[key].visible=false;
+  }
+}
+
+// ============================================================
+// MODO ESCRITORIO: mouse + teclado como fallback
+// ============================================================
+const keys = new Set();
+addEventListener('keydown',e=>{
+  keys.add(e.key.toLowerCase());
+  if(e.key.toLowerCase()==='p') togglePause();
+});
+addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
+renderer.domElement.addEventListener('pointermove',e=>{
+  pointer.x = (e.clientX/innerWidth)*2-1;
+  pointer.y = -(e.clientY/innerHeight)*2+1;
+});
+renderer.domElement.addEventListener('pointerdown',()=>{
+  if(!gameRunning || gamePaused) return;
+  ensureAudio();
+  raycaster.setFromCamera(pointer,camera);
+  const hits=raycaster.intersectObjects(targets,true);
+  if(hits.length){
+    let obj=hits[0].object;
+    while(obj && !targets.includes(obj)) obj=obj.parent;
+    if(obj){
+      selectedObject=obj;
+      obj.userData.grabbed=true;
+      beep(520,.07,'sine',.03);
+    }
+  }
+});
+addEventListener('pointerup',()=>{
+  if(!selectedObject) return;
+  const dist=selectedObject.position.distanceTo(camera.position);
+  if(dist<6) catchTarget(selectedObject); else { selectedObject.userData.velocity.set((Math.random()-.5)*2,Math.random()*1.5,(Math.random()-.5)*2); }
+  selectedObject=null;
+});
+
+function updateDesktop(dt){
+  const speed=2.7*dt;
+  if(keys.has('w')) camera.position.z -= speed;
+  if(keys.has('s')) camera.position.z += speed;
+  if(keys.has('a')) camera.position.x -= speed;
+  if(keys.has('d')) camera.position.x += speed;
+  camera.position.x=THREE.MathUtils.clamp(camera.position.x,-3.8,3.8);
+  camera.position.z=THREE.MathUtils.clamp(camera.position.z,-3.8,3.8);
+
+  if(!selectedObject) return;
+  raycaster.setFromCamera(pointer,camera);
+  const point = raycaster.ray.origin.clone().add(raycaster.ray.direction.clone().multiplyScalar(4.2));
+  selectedObject.position.lerp(point,.18);
+}
+
+// ============================================================
+// LÓGICA PRINCIPAL
+// ============================================================
+function updateTargets(dt){
+  for(let i=targets.length-1;i>=0;i--){
+    const t=targets[i];
+    const d=t.userData;
+    const spin=dt*(.8+level*.08);
+    t.rotation.x += spin;
+    t.rotation.y -= spin*1.3;
+    t.scale.setScalar(1 + Math.sin(performance.now()*.005+d.phase)*.08);
+    if(d.grabbed) continue;
+    t.position.addScaledVector(d.velocity,dt);
+    const r=CONFIG.rules.arenaRadius;
+    if(t.position.length()>r){
+      d.velocity.reflect(t.position.clone().normalize());
+      t.position.normalize().multiplyScalar(r-.25);
+    }
+    const age=(performance.now()-d.born)/1000;
+    const lifeLimit=Math.max(CONFIG.difficulty.lifeEveryBase-level*.18,3.5);
+    if(age>lifeLimit) missTarget(t);
+  }
+}
+
+function updateEffects(dt){
+  for(let i=effects.length-1;i>=0;i--){
+    const e=effects[i]; e.life-=dt;
+    for(const p of e.group.children){
+      p.position.addScaledVector(p.userData.vel,dt);
+      p.scale.multiplyScalar(.96);
+      p.material.opacity=Math.max(0,e.life/.55);
+    }
+    if(e.life<=0){ scene.remove(e.group); effects.splice(i,1); }
+  }
+}
+
+function startGame(){
+  ensureAudio();
+  score=0;lives=CONFIG.rules.startingLives;level=1;timeLeft=CONFIG.rules.startTime;streak=0;targetsCaughtThisLevel=0;spawnClock=0;lifeClock=0;
+  selectedObject=null;clearTargets();
+  gameRunning=true;gamePaused=false;
+  menu.classList.add('hidden'); pausePanel.classList.add('hidden'); gameOverPanel.classList.add('hidden');
+  camera.position.set(0,1.6,0);
+  for(let i=0;i<6;i++) createTarget();
+  updateHud();
+  showMessage('¡Atrapa los núcleos brillantes!',1300);
+  beep(440,.09,'triangle',.035); setTimeout(()=>beep(660,.11,'triangle',.035),90);
+}
+
+function endGame(reason){
+  if(!gameRunning) return;
+  gameRunning=false; selectedObject=null;clearTargets();
+  document.getElementById('gameOverTitle').textContent=reason==='Tiempo agotado'?'⏱️ Tiempo agotado':'💥 Fin de la partida';
+  document.getElementById('gameOverStats').textContent=`Puntuación final: ${score} · Nivel alcanzado: ${level} · Racha máxima: ${streak}`;
+  gameOverPanel.classList.remove('hidden');
+  beep(120,.35,'sawtooth',.05);
+}
+function togglePause(){
+  if(!gameRunning) return;
+  gamePaused=!gamePaused; pausePanel.classList.toggle('hidden',!gamePaused);
+  document.getElementById('pauseBtn').textContent=gamePaused?'Continuar':'Pausa';
+}
+
+function updateGame(dt){
+  if(!gameRunning || gamePaused) return;
+  timeLeft -= dt;
+  spawnClock -= dt;
+  if(timeLeft<=0){timeLeft=0;updateHud();endGame('Tiempo agotado');return;}
+  const spawnEvery=Math.max(.38,CONFIG.difficulty.spawnEveryBase - level*.07);
+  if(spawnClock<=0){spawnClock=spawnEvery;createTarget();}
+  updateTargets(dt);
+  updateEffects(dt);
+  updateHud();
+}
+
+// ============================================================
+// WEBXR / BUCLE
+// ============================================================
+renderer.xr.addEventListener('sessionstart',()=>{
+  xrStarted=true;desktopMode=false;cameraHint.textContent='VR: usa la mano para señalar y pellizcar; mueve la cabeza para explorar los 360°.';
+  showMessage('VR activo · Hand Tracking listo',1300);
+});
+renderer.xr.addEventListener('sessionend',()=>{xrStarted=false;desktopMode=true;xrBtn.textContent='Entrar en VR/AR';cameraHint.textContent='Escritorio: señala con el cursor y clic para interactuar · WASD para moverte';scene.background=new THREE.Color(CONFIG.theme.background);scene.fog=new THREE.FogExp2(CONFIG.theme.fog,0.028);});
+
+xrBtn.addEventListener('click', async ()=>{
+  try{
+    ensureAudio();
+    if(renderer.xr.isPresenting){
+      await renderer.xr.getSession().end();
+      return;
+    }
+    if(!navigator.xr){
+      showMessage('WebXR no está disponible en este navegador.',1600);
+      return;
+    }
+
+    // Prioridad: VR inmersivo. Si no existe, intentamos AR inmersivo.
+    let mode = null;
+    if(await navigator.xr.isSessionSupported('immersive-vr')) mode = 'immersive-vr';
+    else if(await navigator.xr.isSessionSupported('immersive-ar')) mode = 'immersive-ar';
+    if(!mode){
+      showMessage('Este dispositivo no soporta VR/AR inmersivo.',1600);
+      return;
+    }
+
+    const session = await navigator.xr.requestSession(mode, {
+      requiredFeatures:['local-floor'],
+      optionalFeatures:['hand-tracking','bounded-floor','dom-overlay'],
+      domOverlay:{root:document.body}
+    });
+    await renderer.xr.setSession(session);
+    if(mode==='immersive-ar'){
+      scene.background = null;
+      scene.fog = null;
+      xrBtn.textContent='Salir de AR/VR';
+      cameraHint.textContent='AR: mira a tu alrededor y pellizca los núcleos. El juego se superpone al entorno real.';
+    }else{
+      scene.background = new THREE.Color(CONFIG.theme.background);
+      scene.fog = new THREE.FogExp2(CONFIG.theme.fog, 0.028);
+      xrBtn.textContent='Salir de AR/VR';
+    }
+  }catch(e){
+    console.error(e);
+    showMessage('No se pudo iniciar la sesión VR/AR. Revisa los permisos del navegador.',1800);
+  }
+});
+
+document.getElementById('startBtn').onclick=startGame;
+document.getElementById('pauseBtn').onclick=togglePause;
+document.getElementById('resumeBtn').onclick=togglePause;
+document.getElementById('restartBtn1').onclick=startGame;
+document.getElementById('restartBtn2').onclick=startGame;
+
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+
+function animate(){
+  const dt=Math.min(clock.getDelta(),.05);
+  if(!xrStarted) updateDesktop(dt);
+  const session=renderer.xr.getSession();
+  if(session && gameRunning && !gamePaused){
+    const frame=renderer.xr.getFrame?.();
+    const ref=renderer.xr.getReferenceSpace?.() || renderer.xr.getBaseReferenceSpace?.();
+    if(frame && ref) processHands(frame,ref);
+  }
+  updateGame(dt);
+  stars.rotation.y += dt*.005;
+  ring.rotation.z += dt*.035;
+  renderer.render(scene,camera);
+}
+renderer.setAnimationLoop(animate);
+
+// Crear una previsualización de arena antes de jugar.
+for(let i=0;i<4;i++) createTarget();
+updateHud();
+</script>
+</body>
+</html>
